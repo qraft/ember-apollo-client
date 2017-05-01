@@ -21,6 +21,31 @@ const {
 
 const { alias } = computed;
 
+function newDataFunc(observable, resultKey, resolve) {
+  let obj;
+  let mergedProps = { _apolloObservable: observable };
+
+  return ({ data }) => {
+    let dataToSend = isNone(resultKey) ? data : data[resultKey];
+    dataToSend = copy(dataToSend, true);
+    if (isNone(obj)) {
+      if (isArray(dataToSend)) {
+        obj = A(dataToSend);
+        obj.setProperties(mergedProps);
+      } else {
+        obj = EmberObject.create(merge(dataToSend, mergedProps));
+      }
+      return resolve(obj);
+    }
+
+    run(() => {
+      isArray(obj)
+        ? obj.setObjects(dataToSend)
+        : setProperties(obj, dataToSend);
+    });
+  };
+}
+
 export default Service.extend({
   client: null,
   apiURL: alias('options.apiURL'),
@@ -152,7 +177,6 @@ export default Service.extend({
             reject(e);
           },
         });
-        return subscription;
       })
     );
   },
@@ -175,6 +199,23 @@ export default Service.extend({
           response = response[resultKey];
         }
         return RSVP.resolve(copy(response, true));
+      })
+    );
+  },
+
+  managedWatchQuery(opts, resultKey, manager) {
+    let observable = this.client.watchQuery(opts);
+    manager.get('queries').pushObject(observable);
+
+    return this._waitFor(
+      new RSVP.Promise((resolve, reject) => {
+        let subscription = observable.subscribe({
+          next: newDataFunc(observable, resultKey, resolve),
+          error(e) {
+            reject(e);
+          },
+        });
+        manager.get('activeSubscriptions').pushObject(subscription);
       })
     );
   },
